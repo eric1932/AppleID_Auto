@@ -320,8 +320,9 @@ def job():
     return unlock
 
 
-id = AppleID(config.username, config.dob, config.answer)
-job()
-while True:
-    schedule.run_pending()
-    time.sleep(1)
+if __name__ == '__main__':
+    id = AppleID(config.username, config.dob, config.answer)
+    job()
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
