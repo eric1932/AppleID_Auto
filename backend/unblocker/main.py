@@ -1,11 +1,11 @@
 import argparse
 import datetime
+import json
 import logging
 import random
 import re
 import string
 import time
-from json import loads
 
 import ddddocr
 import schedule
@@ -27,8 +27,10 @@ class API:
 
     def get_password(self, username):
         try:
-            result = loads(get(f"{self.url}/api/?key={self.key}&action=get_password&username={username}",verify=False).text)
-        except BaseException:
+            result = json.loads(
+                get(f"{self.url}/api/?key={self.key}&action=get_password&username={username}", verify=False).text)
+        except BaseException as e:
+            error(e)
             return False
         else:
             if result["status"] == "success":
@@ -38,8 +40,9 @@ class API:
 
     def get_config(self, id):
         try:
-            result = loads(get(f"{self.url}/api/?key={self.key}&action=get_task_info&id={id}",verify=False).text)
-        except BaseException:
+            result = json.loads(get(f"{self.url}/api/?key={self.key}&action=get_task_info&id={id}", verify=False).text)
+        except BaseException as e:
+            error(e)
             return {"status": "fail"}
         else:
             if result["status"] == "success":
@@ -49,9 +52,11 @@ class API:
 
     def update(self, username, password):
         try:
-            result = loads(
-                get(f"{self.url}/api/?key={self.key}&username={username}&password={password}&action=update_password",verify=False).text)
-        except BaseException:
+            result = json.loads(
+                get(f"{self.url}/api/?key={self.key}&username={username}&password={password}&action=update_password",
+                    verify=False).text)
+        except BaseException as e:
+            error(e)
             return {"status": "fail"}
         else:
             if result["status"] == "success":
@@ -134,7 +139,8 @@ class ID:
         driver.get("https://iforgot.apple.com/password/verify/appleid?language=en_US")
         try:
             driver.switch_to.alert.accept()
-        except BaseException:
+        except BaseException as e:
+            error(e)
             pass
         time.sleep(config.step_sleep)
 
