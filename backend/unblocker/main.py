@@ -289,7 +289,6 @@ def setup_driver():
 
 def job():
     global api
-    schedule.clear()
     password = api.get_password(config.username)
     if password == "":
         error("获取密码失败，可能是账号不存在")
@@ -316,13 +315,13 @@ def job():
         info("更新密码成功")
     if unlock:
         notification(f"Apple ID解锁成功\n新密码：{id.password}")
-    schedule.every(config.check_interval).minutes.do(job)
     return unlock
 
 
 if __name__ == '__main__':
     id = AppleID(config.username, config.dob, config.answer)
     job()
+    schedule.every(config.check_interval).minutes.do(job)
     while True:
         schedule.run_pending()
         time.sleep(1)
