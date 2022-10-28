@@ -1,6 +1,4 @@
 import argparse
-import datetime
-import json
 import logging
 import random
 import re
@@ -9,9 +7,12 @@ import time
 
 import ddddocr
 import schedule
-from requests import get
 from selenium import webdriver
 from telegram.ext import Updater, CommandHandler
+
+from API import API
+from Config import Config
+from utils import info, error
 
 parser = argparse.ArgumentParser(description="")
 parser.add_argument("-api_url", help="API URL")
@@ -19,121 +20,77 @@ parser.add_argument("-api_key", help="API key")
 parser.add_argument("-taskid", help="Task ID")
 args = parser.parse_args()
 
+ocr = ddddocr.DdddOcr()
 
-class API:
-    def __init__(self, url, key):
-        self.url = url
-        self.key = key
+api = API(args.api_url, args.api_key)
+config_result = api.get_config(args.taskid)
 
-    def get_password(self, username):
-        try:
-            result = json.loads(
-                get(f"{self.url}/api/?key={self.key}&action=get_password&username={username}", verify=False).text)
-        except BaseException as e:
-            error(e)
-            return False
-        else:
-            if result["status"] == "success":
-                return result["password"]
-            else:
-                return ""
+if config_result["status"] == "fail":
+    error("从API获取配置失败")
+    exit()
 
-    def get_config(self, id):
-        try:
-            result = json.loads(get(f"{self.url}/api/?key={self.key}&action=get_task_info&id={id}", verify=False).text)
-        except BaseException as e:
-            error(e)
-            return {"status": "fail"}
-        else:
-            if result["status"] == "success":
-                return result
-            else:
-                return {"status": "fail"}
-
-    def update(self, username, password):
-        try:
-            result = json.loads(
-                get(f"{self.url}/api/?key={self.key}&username={username}&password={password}&action=update_password",
-                    verify=False).text)
-        except BaseException as e:
-            error(e)
-            return {"status": "fail"}
-        else:
-            if result["status"] == "success":
-                return result
-            else:
-                return {"status": "fail"}
+config = Config(username=config_result["username"],
+                dob=config_result["dob"], q1=config_result["q1"], a1=config_result["a1"],
+                q2=config_result["q2"], a2=config_result["a2"], q3=config_result["q3"], a3=config_result["a3"],
+                check_interval=config_result["check_interval"], tgbot_token=config_result["tgbot_token"],
+                tgbot_chat_id=config_result["tgbot_chatid"],
+                step_sleep=config_result["step_sleep"], webdriver_addr=config_result["webdriver"])
 
 
-class Config:
-    def __init__(self, username, dob, q1, a1, q2, a2, q3, a3, check_interval, tgbot_token, tgbot_chatid, step_sleep,
-                 webdriver):
-        self.remote_driver = False
-        self.tgbot_enable = False
-        self.password_length = 10
-        self.username = username
-        self.dob = dob
-        self.answer = {q1: a1, q2: a2, q3: a3}
-        self.check_interval = check_interval
-        self.webdriver = webdriver
-        self.step_sleep = step_sleep
-        if tgbot_chatid != "" and tgbot_token != "":
-            self.tgbot_enable = True
-            self.tgbot_chatid = tgbot_chatid
-            self.tgbot_token = tgbot_token
-        if self.webdriver != "local":
-            self.remote_driver = True
-
-    def __str__(self) -> str:
-        return f"Username: {self.username}\n" \
-               f"DOB: {self.dob}\n" \
-               f"Answer: {self.answer}\n" \
-               f"Check Interval: {self.check_interval}\n" \
-               f"Webdriver: {self.webdriver}\n" \
-               f"Step Sleep: {self.step_sleep}\n" \
-               f"Remote Driver: {self.remote_driver}\n" \
-               f"Telegram Bot: {self.tgbot_enable}\n" \
-               f"Password Length: {self.password_length}"
-
-
-class TGbot:
-    def __init__(self, chatid, token):
-        self.updater = Updater(token)
+class TGBot:
+    def __init__(self, config_: Config):
+        self.chat_id = config_.tgbot_chat_id
+        self.updater = Updater(config_.tgbot_token)
         self.updater.dispatcher.add_handler(CommandHandler('ping', self.ping))
         self.updater.dispatcher.add_handler(CommandHandler('job', self.job))
+        self.updater.dispatcher.add_handler(CommandHandler('help', self.help))
         self.updater.start_polling()
+
+    def help(self, bot, update):
+        self.send_message("命令列表:\n/ping - 检测机器人存活\n/job - 手动执行任务")
 
     def ping(self, bot, update):
         info("Telegram 检测存活")
-        self.sendmessage("还活着捏")
+        self.send_message("还活着捏")
 
     def job(self, bot, update):
         info("手动执行任务")
-        self.sendmessage("开始检测账号")
+        self.send_message("开始检测账号")
         job()
 
-    def sendmessage(self, text):
-        return self.updater.bot.send_message(chat_id=config.tgbot_chatid, text=text)["message_id"]
+    def send_message(self, text):
+        return self.updater.bot.send_message(chat_id=self.chat_id, text=text)["message_id"]
 
 
-class ID:
+class AppleID:
     def __init__(self, username, dob, answer):
         self.username = username
         self.password = ""
         self.dob = dob
         self.answer = answer
 
-    def generate_password(self):
+    def generate_password(self) -> str:
+        """
+        生成随机密码 长度为 config.password_length
+        :return:
+        """
         pw = ""
-        str = string.digits * 2 + string.ascii_letters
-        while not (re.match(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)', pw)):
-            pw = ''.join(random.sample(str, k=config.password_length))
+        sample = string.digits * 2 + string.ascii_letters  # 0-9 0-9 a-z A-Z
+        while not re.match(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)', pw):
+            pw = ''.join(random.sample(sample, k=config.password_length))
         return pw
 
-    def get_answer(self, question):
+    def get_answer(self, question: str) -> str:
+        """
+        从 self.answer 中获取问题的答案
+        :param question: 问题文本
+        :return: 答案或者空字符串
+        """
+        logging.info(f"当前问题: {question}")
         for item in self.answer:
             if question.find(item) != -1:
                 return self.answer.get(item)
+        return ""
 
     def refresh(self):
         driver.get("https://iforgot.apple.com/password/verify/appleid?language=en_US")
@@ -186,7 +143,11 @@ class ID:
             info("当前账号已被锁定")
             return False  # 被锁定
 
-    def check_2fa(self):
+    def check_2fa(self) -> bool:
+        """
+        检查 2FA 是否开启
+        :return: True 为开启，False 为未开启
+        """
         try:
             driver.find_element("xpath",
                                 "/html/body/div[1]/iforgot-v2/app-container/div/iforgot-body/hsa-two-v2/recovery-web-app/idms-flow/div/div/trusted-phone-number/div/h1")
@@ -291,36 +252,13 @@ class ID:
             time.sleep(10)
 
 
-def info(text):
-    logging.info(text)
-    print(datetime.datetime.now().strftime("%H:%M:%S"), "[INFO]", text)
-
-
-def error(text):
-    logging.critical(text)
-    print(datetime.datetime.now().strftime("%H:%M:%S"), "[ERROR]", text)
-
-
-api = API(args.api_url, args.api_key)
-config_result = api.get_config(args.taskid)
-if config_result["status"] == "fail":
-    error("从API获取配置失败")
-    exit()
-config = Config(config_result["username"], config_result["dob"], config_result["q1"], config_result["a1"],
-                config_result["q2"], config_result["a2"], config_result["q3"], config_result["a3"],
-                config_result["check_interval"], config_result["tgbot_token"], config_result["tgbot_chatid"],
-                config_result["step_sleep"], config_result["webdriver"])
-
-
 def notification(content):
     if config.tgbot_enable:
-        tgbot.sendmessage(content)
+        tgbot.send_message(content)
 
-
-ocr = ddddocr.DdddOcr()
 
 if config.tgbot_enable:
-    tgbot = TGbot(config.tgbot_chatid, config.tgbot_token)
+    tgbot = TGBot(config)
 
 
 def setup_driver():
@@ -382,7 +320,7 @@ def job():
     return unlock
 
 
-id = ID(config.username, config.dob, config.answer)
+id = AppleID(config.username, config.dob, config.answer)
 job()
 while True:
     schedule.run_pending()
