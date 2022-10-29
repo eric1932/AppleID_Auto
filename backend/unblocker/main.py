@@ -2,6 +2,7 @@ import argparse
 import logging
 import random
 import re
+import signal
 import string
 import time
 
@@ -317,6 +318,18 @@ def job():
         notification(f"Apple ID解锁成功\n新密码：{id.password}")
     return unlock
 
+
+def sigint_handler(signum, frame):
+    info("正在退出...")
+    schedule.clear()
+    try:
+        driver.quit()
+    except Exception as e:
+        print(e)
+    exit()
+
+
+signal.signal(signal.SIGINT, sigint_handler)
 
 if __name__ == '__main__':
     id = AppleID(config.username, config.dob, config.answer)
